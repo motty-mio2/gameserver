@@ -9,6 +9,7 @@ from .model import (
     JoinInfo,
     JoinRoomResult,
     PlayInfo,
+    RoomInfo,
     SafeUser,
     get_user_by_token,
 )
@@ -93,15 +94,26 @@ class RoomListResponse(BaseModel):
 
 
 @app.post("/room/list", response_model=RoomListResponse)
-def room_list(req: int):
-    room_ids: list[int] = model.room_list(live_id=req)
+def room_list(live_id: int):
+    room_ids: list[int] = model.room_list(live_id=live_id)
     return RoomListResponse(room_ids=room_ids)
 
 
 @app.post("/room/join", response_model=JoinRoomResult)
-def room_join(req: JoinInfo, token: str = Depends(get_auth_token)) -> Any:
+def room_join(join_info: JoinInfo, token: str = Depends(get_auth_token)) -> Any:
     user = get_user_by_token(token=token)
     if user is None:
         return None
     else:
-        return model.room_join(room_id=req.room_id, user_id=user.id, select_difficulty=req.select_difficulty)
+        return model.room_join(
+            room_id=join_info.room_id, user_id=user.id, select_difficulty=join_info.select_difficulty
+        )
+
+
+@app.post("/room/wait", response_model=list[RoomInfo])
+def room_wait(room_id: int, token: str = Depends(get_auth_token)):
+    user = get_user_by_token(token=token)
+    if user is None:
+        return None
+    else:
+        return model.room_wait(room_id=room_id, user_id=user.id)
