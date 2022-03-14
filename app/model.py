@@ -43,7 +43,14 @@ def create_user(name: str, leader_card_id: int) -> str:
 
 def _get_user_by_token(conn, token: str) -> Optional[SafeUser]:
     # TODO: 実装
-    pass
+    result = conn.execute(text("select * from user"))
+    rows = result.fetchall()
+    for user in rows:
+        if user["token"] == token:
+            target_user = SafeUser(id=user["id"], name=user["name"], leader_card_id=user["leader_card_id"])
+            return target_user
+    else:
+        return None
 
 
 def get_user_by_token(token: str) -> Optional[SafeUser]:
@@ -52,7 +59,11 @@ def get_user_by_token(token: str) -> Optional[SafeUser]:
 
 
 def update_user(token: str, name: str, leader_card_id: int) -> None:
-    # このコードを実装してもらう
+    with engine.begin() as conn:
+        conn.execute(
+            text("UPDATE `user` SET name=:name, leader_card_id=:leader_card_id WHERE token=:token"),
+            {"name": name, "leader_card_id": leader_card_id, "token": token},
+        )
     with engine.begin() as conn:
         # TODO: 実装
         pass
