@@ -81,3 +81,12 @@ def room_create(req: PlayInfo, token: str = Depends(get_auth_token)):
         print(room_id)
     return RoomCreateResponse(room_id=room_id)
 
+
+class RoomListResponse(BaseModel):
+    room_ids: list[int]
+
+
+@app.post("/room/list", response_model=RoomListResponse)
+def room_list(req: int):
+    room_ids: list[int] = model.room_list(live_id=req)
+    return RoomListResponse(room_ids=room_ids)

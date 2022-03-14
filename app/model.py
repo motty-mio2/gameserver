@@ -77,6 +77,10 @@ def room_create(user_id: int, live_id: int, select_difficulty: LiveDifficulty) -
         print(f"room id is {result.lastrowid}")
         return result.lastrowid
 
+
+def room_list(live_id: int) -> list[int]:
     with engine.begin() as conn:
-        # TODO: 実装
-        pass
+        result = conn.execute(text("SELECT `room_id` FROM `room` WHERE `live_id`=:live_id"), {"live_id": live_id})
+        room_ids = [room[0] for room in result.fetchall()]
+    return room_ids
+
