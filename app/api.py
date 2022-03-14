@@ -99,6 +99,11 @@ def room_list(live_id: int):
     return RoomListResponse(room_ids=room_ids)
 
 
+class JoinInfo(BaseModel):
+    room_id: int
+    select_difficulty: LiveDifficulty = LiveDifficulty.normal
+
+
 @app.post("/room/join", response_model=JoinRoomResult)
 def room_join(join_info: JoinInfo, token: str = Depends(get_auth_token)) -> Any:
     user = get_user_by_token(token=token)

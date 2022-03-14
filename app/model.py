@@ -68,6 +68,13 @@ class RoomUser(BaseModel):
     is_me: bool  # リクエスト投げたユーザーと同じか
     is_host: bool  # 部屋を立てた人か
 
+
+class ResultUser(BaseModel):
+    user_id: int  # ユーザー識別子
+    judge_count_list: list[int]  # 各判定数（良い判定から昇順）
+    score: int  # 獲得スコア
+
+
 def create_user(name: str, leader_card_id: int) -> str:
     """Create new user and returns their token"""
     token = str(uuid.uuid4())
@@ -116,14 +123,16 @@ def room_create(user_id: int, live_id: int, select_difficulty: LiveDifficulty) -
         ).lastrowid
         conn.execute(  # type: ignore
             text("INSERT INTO `room_member` (room_id, id, diff) VALUES(:room_id, :id, :diff)"),
-            {"room_id": room_id, "id": user_id, "diff": int(select_difficulty)},
+            {"room_id": room_id, "id": user_id, "diff": select_difficulty.value},
         )
         return room_id
 
 
 def room_list(live_id: int) -> list[int]:
     with engine.begin() as conn:
-        result = conn.execute(text("SELECT `room_id` FROM `room` WHERE `live_id`=:live_id"), {"live_id": live_id})
+        result = conn.execute(
+            text("SELECT `room_id` FROM `room` WHERE `live_id`=:live_id AND `status`=1"), {"live_id": live_id}
+        )
         room_ids = [room[0] for room in result.fetchall()]
     return room_ids
 
@@ -137,11 +146,13 @@ class JoinRoomResult(IntEnum):
 
 def room_join(room_id: int, user_id: int, select_difficulty: LiveDifficulty) -> JoinRoomResult:
     with engine.begin() as conn:
-        members: int = conn.execute(
-            text("SELECT `room_members_count` FROM `room` WHERE `room_id`=:room_id"), {"room_id": room_id}
-        ).fetchall()[0][0]
-        if members == 0:
+        members, status = conn.execute(
+            text("SELECT `room_members_count`, `status` FROM `room` WHERE `room_id`=:room_id"), {"room_id": room_id}
+        ).fetchall()[0]
+        if status != 1 or members < 1:
             return JoinRoomResult.Disbanded
+        elif members >= 4:
+            return JoinRoomResult.RoomFull
         elif 0 < members < 4:
             # UPDATE room Table
             conn.execute(
@@ -151,15 +162,15 @@ def room_join(room_id: int, user_id: int, select_difficulty: LiveDifficulty) -> 
             # UPDATE room_member table
             conn.execute(
                 text(
-                    "INSERT `room_member` (room_id, live_id, id, diff, exist) \
-                    VALUES(:room_id, :token, :leader_card_id, :diff, :exist) \
-                    ON DUPLICATE KEY UPDATE (exist) VALUES (:exist)"
+                    "INSERT `room_member` (room_id, id, diff) \
+                    VALUES (:room_id, :id, :diff) \
+                    ON DUPLICATE KEY UPDATE diff=:diff, exist=1"
                 ),
-                {"room_id": room_id, "id": user_id, "diff": select_difficulty, "exist": 1},
+                {"room_id": room_id, "id": user_id, "diff": select_difficulty.value},
             )
             return JoinRoomResult.Ok
         else:
-            return JoinRoomResult.RoomFull
+            pass
     return JoinRoomResult.OtherError
 
 
@@ -172,34 +183,24 @@ def room_wait(room_id: int, user_id: int) -> tuple[Optional[WaitRoomStatus], Opt
         status: WaitRoomStatus = WaitRoomStatus(status)
 
         result_member: list[tuple[int, ...]] = conn.execute(  # type: ignore
-            text("SELECT `id`, `diff`, `exist` FROM `room_member` WHERE `room_id`=:room_id"), {"room_id": room_id}
+            text("SELECT `id`, `diff` FROM `room_member` WHERE `room_id`=:room_id AND exist=1"), {"room_id": room_id}
         ).fetchall()  # type: ignore
 
-        user_ids: dict[int, dict[str, int]] = dict()
-        for id, diff, exist in result_member:  # type: ignore
-            if id in user_ids.keys():
-                user_ids[id]["exist"] *= exist
-            else:
-                user_ids[id] = {"diff": diff, "exist": exist}
-
         user_list: list[RoomUser] = []
-        for target_id, target_status in user_ids.items():
-            if target_status["exist"]:
-                name, lci = conn.execute(  # type: ignore
-                    text("SELECT `name`, `leader_card_id` FROM `user` WHERE `id`=:user_id"), {"user_id": user_id}
-                ).fetchall()[0]
-                user_list.append(
-                    RoomUser(
-                        user_id=target_id,
-                        name=name,  # type: ignore
-                        leader_card_id=lci,  # type: ignore
-                        select_difficulty=LiveDifficulty(target_status["diff"]),  # type: ignore
-                        is_me=(target_id == user_id),
-                        is_host=(target_id == owner_id),  # type: ignore
-                    )
+        for id, diff in result_member:  # type: ignore
+            name, lci = conn.execute(  # type: ignore
+                text("SELECT `name`, `leader_card_id` FROM `user` WHERE `id`=:user_id"), {"user_id": id}
+            ).fetchall()[0]
+            user_list.append(
+                RoomUser(
+                    user_id=id,
+                    name=name,  # type: ignore
+                    leader_card_id=lci,  # type: ignore
+                    select_difficulty=LiveDifficulty(diff),  # type: ignore
+                    is_me=(id == user_id),
+                    is_host=(id == owner_id),  # type: ignore
                 )
-            else:
-                pass
+            )
 
     return status, user_list
 
@@ -227,8 +228,8 @@ def room_leave(room_id: int, user_id: int):
         if owner_id == user_id:
 
             conn.execute(
-                text("UPDATE `room` SET status=:status WHERE room_id=:room_id"),
-                {"status": 3, "room_id": room_id},
+                text("UPDATE `room` SET status=3 WHERE room_id=:room_id"),
+                {"room_id": room_id},
             )
         else:
             members: int = conn.execute(
