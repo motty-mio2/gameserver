@@ -22,7 +22,7 @@ CREATE TABLE `room` (
 DROP TABLE IF EXISTS `room_member`;
 CREATE TABLE `room_member` (
   `room_id` bigint NOT NULL,
-  `live_id` varchar(255) DEFAULT NULL,
+  -- `live_id` varchar(255) DEFAULT NULL,
   `id` bigint DEFAULT NULL,
   `exist` int DEFAULT 1,
   PRIMARY KEY (`room_id`)

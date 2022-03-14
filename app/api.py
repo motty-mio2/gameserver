@@ -1,11 +1,17 @@
-from enum import Enum
+from typing import Any
 
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.security.http import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel
 
 from . import model
-from .model import SafeUser
+from .model import (
+    JoinInfo,
+    JoinRoomResult,
+    PlayInfo,
+    SafeUser,
+    get_user_by_token,
+)
 
 app = FastAPI()
 
@@ -90,3 +96,12 @@ class RoomListResponse(BaseModel):
 def room_list(req: int):
     room_ids: list[int] = model.room_list(live_id=req)
     return RoomListResponse(room_ids=room_ids)
+
+
+@app.post("/room/join", response_model=JoinRoomResult)
+def room_join(req: JoinInfo, token: str = Depends(get_auth_token)) -> Any:
+    user = get_user_by_token(token=token)
+    if user is None:
+        return None
+    else:
+        return model.room_join(room_id=req.room_id, user_id=user.id, select_difficulty=req.select_difficulty)

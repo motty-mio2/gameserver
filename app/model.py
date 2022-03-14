@@ -26,6 +26,29 @@ class SafeUser(BaseModel):
         orm_mode = True
 
 
+class LiveDifficulty(IntEnum):
+    normal = 1
+    hard = 2
+class JoinInfo(BaseModel):
+    room_id: int
+    select_difficulty: LiveDifficulty = LiveDifficulty.normal
+
+class RoomInfo(BaseModel):
+    name: type  # memo
+    room_id: int  # 部屋識別子
+    live_id: int  # プレイ対象の楽曲識別子
+    room_members_count: int  # 部屋に入っている人数
+    max_user_count: int  # 部屋の最大人数
+
+
+class RoomUser(BaseModel):
+    user_id: int  # ユーザー識別子
+    name: str  # ユーザー名
+    leader_card_id: int  # 設定アバター
+    select_difficulty: LiveDifficulty  # 選択難易度
+    is_me: bool  # リクエスト投げたユーザーと同じか
+    is_host: bool  # 部屋を立てた人か
+
 def create_user(name: str, leader_card_id: int) -> str:
     """Create new user and returns their token"""
     token = str(uuid.uuid4())
@@ -83,4 +106,39 @@ def room_list(live_id: int) -> list[int]:
         result = conn.execute(text("SELECT `room_id` FROM `room` WHERE `live_id`=:live_id"), {"live_id": live_id})
         room_ids = [room[0] for room in result.fetchall()]
     return room_ids
+
+
+class JoinRoomResult(IntEnum):
+    Ok = 1  # 入場OK
+    RoomFull = 2  # 満員
+    Disbanded = 3  # 解散済み
+    OtherError = 4  # その他エラー
+
+
+def room_join(room_id: int, user_id: int, select_difficulty: LiveDifficulty) -> JoinRoomResult:
+    with engine.begin() as conn:
+        result = conn.execute(
+            text("SELECT `room_members_count` FROM `room` WHERE `room_id`=:room_id"), {"room_id": room_id}
+        )
+        # rx = result.fetchall()
+        # print(f"{result.fetchall()}-{rx}-{rx[0]}-{rx[0][0]}")
+        # print(f"members {result.fetchall()}")
+        members: int = (result.fetchall())[0][0]
+        if members == 0:
+            return JoinRoomResult.Disbanded
+        elif 0 < members < 4:
+            # UPDATE room Table
+            conn.execute(
+                text("UPDATE `room` SET room_members_count:room_members_count WHERE room_id=:room_id"),
+                {"room_members_count": members + 1, "room_id": room_id},
+            )
+            # UPDATE room_member table
+            conn.execute(
+                text("INSERT `room_member` (room_id, live_id, id, exist) VALUES(:room_id, :token, :leader_card_id"),
+                {"room_id": room_id, "id": user_id, "exist": 1},
+            )
+            return JoinRoomResult.Ok
+        else:
+            return JoinRoomResult.RoomFull
+    return JoinRoomResult.OtherError
 
