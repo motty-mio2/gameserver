@@ -115,8 +115,8 @@ def room_create(user_id: int, live_id: int, select_difficulty: LiveDifficulty) -
             {"live_id": live_id, "room_members_count": 1, "owner_id": user_id},  # type: ignore
         ).lastrowid
         conn.execute(  # type: ignore
-            text("INSERT INTO `room_member` (room_id, id) VALUES(:room_id, :id)"),
-            {"room_id": room_id, "id": user_id},
+            text("INSERT INTO `room_member` (room_id, id, diff) VALUES(:room_id, :id, :diff)"),
+            {"room_id": room_id, "id": user_id, "diff": int(select_difficulty)},
         )
         return room_id
 
@@ -137,10 +137,9 @@ class JoinRoomResult(IntEnum):
 
 def room_join(room_id: int, user_id: int, select_difficulty: LiveDifficulty) -> JoinRoomResult:
     with engine.begin() as conn:
-        result = conn.execute(
+        members: int = conn.execute(
             text("SELECT `room_members_count` FROM `room` WHERE `room_id`=:room_id"), {"room_id": room_id}
-        )
-        members: int = (result.fetchall())[0][0]
+        ).fetchall()[0][0]
         if members == 0:
             return JoinRoomResult.Disbanded
         elif 0 < members < 4:
@@ -194,7 +193,7 @@ def room_wait(room_id: int, user_id: int) -> tuple[Optional[WaitRoomStatus], Opt
                         user_id=target_id,
                         name=name,  # type: ignore
                         leader_card_id=lci,  # type: ignore
-                        select_difficulty=LiveDifficulty.normal(target_status["diff"]),  # type: ignore
+                        select_difficulty=LiveDifficulty(target_status["diff"]),  # type: ignore
                         is_me=(target_id == user_id),
                         is_host=(target_id == owner_id),  # type: ignore
                     )
@@ -216,4 +215,33 @@ def room_start(room_id: int, user_id: int):
                 text("UPDATE `room` SET status=:status WHERE room_id=:room_id"), {"status": 2, "room_id": room_id}
             )
 
+    return None
+
+
+def room_leave(room_id: int, user_id: int):
+    with engine.begin() as conn:
+        owner_id = conn.execute(
+            text("SELECT `owner_id` FROM `room` WHERE `room_id`=:room_id"), {"room_id": room_id}
+        ).fetchall()[0]
+
+        if owner_id == user_id:
+
+            conn.execute(
+                text("UPDATE `room` SET status=:status WHERE room_id=:room_id"),
+                {"status": 3, "room_id": room_id},
+            )
+        else:
+            members: int = conn.execute(
+                text("SELECT `room_members_count` FROM `room` WHERE `room_id`=:room_id"), {"room_id": room_id}
+            ).fetchall()[0][0]
+
+            conn.execute(
+                text("UPDATE `room` SET room_members_count=:room_members_count WHERE room_id=:room_id"),
+                {"room_members_count": members - 1, "room_id": room_id},
+            )
+
+            conn.execute(
+                text("UPDATE `room_member` SET exist=:exist WHERE room_id=:room_id AND id=:id"),
+                {"exist": 0, "room_id": room_id, "id": user_id},
+            )
     return None
