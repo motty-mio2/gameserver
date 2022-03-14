@@ -65,3 +65,19 @@ def update(req: UserCreateRequest, token: str = Depends(get_auth_token)):
     # print(req)
     model.update_user(token, req.user_name, req.leader_card_id)
     return None
+
+
+class RoomCreateResponse(BaseModel):
+    room_id: int
+
+
+@app.post("/room/create", response_model=RoomCreateResponse)
+def room_create(req: PlayInfo, token: str = Depends(get_auth_token)):
+    user = get_user_by_token(token=token)
+    if user is None:
+        return None
+    else:
+        room_id: int = model.room_create(user_id=user.id, live_id=req.live_id, select_difficulty=req.select_difficulty)
+        print(room_id)
+    return RoomCreateResponse(room_id=room_id)
+

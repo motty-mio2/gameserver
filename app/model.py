@@ -64,6 +64,19 @@ def update_user(token: str, name: str, leader_card_id: int) -> None:
             text("UPDATE `user` SET name=:name, leader_card_id=:leader_card_id WHERE token=:token"),
             {"name": name, "leader_card_id": leader_card_id, "token": token},
         )
+
+
+def room_create(user_id: int, live_id: int, select_difficulty: LiveDifficulty) -> int:
+    with engine.begin() as conn:
+        result: Any = conn.execute(
+            text(
+                "INSERT INTO `room` (live_id, room_members_count, owner_id) VALUES (:live_id, :room_members_count, :owner_id)"
+            ),
+            {"live_id": live_id, "room_members_count": 1, "owner_id": user_id},  # type: ignore
+        )
+        print(f"room id is {result.lastrowid}")
+        return result.lastrowid
+
     with engine.begin() as conn:
         # TODO: 実装
         pass
