@@ -21,9 +21,10 @@ CREATE TABLE `room` (
 
 DROP TABLE IF EXISTS `room_member`;
 CREATE TABLE `room_member` (
+  `column_id` bigint NOT NULL AUTO_INCREMENT,
   `room_id` bigint NOT NULL,
   `id` bigint DEFAULT NULL,
   `diff` int DEFAULT NULL,
   `exist` int DEFAULT 1,
-  PRIMARY KEY (`room_id`)
+  PRIMARY KEY (`column_id`)
 );
