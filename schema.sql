@@ -12,7 +12,7 @@ DROP TABLE IF EXISTS `room`;
 CREATE TABLE `room` (
   `room_id` bigint NOT NULL AUTO_INCREMENT,
   `live_id` int DEFAULT NULL,
-  `room_members_count` int DEFAULT NULL,
+  `room_members_count` int DEFAULT 1,
   `max_user_count` int DEFAULT 4,
   `owner_id` bigint DEFAULT NULL,
   `status` int DEFAULT 1,
