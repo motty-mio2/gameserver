@@ -117,3 +117,13 @@ def room_wait(room_id: int, token: str = Depends(get_auth_token)):
         return None
     else:
         return model.room_wait(room_id=room_id, user_id=user.id)
+
+
+@app.post("/room/start", response_model=Empty)
+def room_start(room_id: int, token: str = Depends(get_auth_token)):
+    user = get_user_by_token(token=token)
+    if user is None:
+        return None
+    else:
+        return model.room_start(room_id=room_id, user_id=user.id)
+

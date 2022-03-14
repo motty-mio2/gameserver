@@ -26,9 +26,12 @@ class SafeUser(BaseModel):
         orm_mode = True
 
 
+# Enum
 class LiveDifficulty(IntEnum):
     normal = 1
     hard = 2
+
+
 class WaitRoomStatus(IntEnum):
     Waiting = 1  # ホストがライブ開始ボタン押すのを待っている
     LiveStart = 2  # ライブ画面遷移OK
@@ -37,8 +40,8 @@ class JoinInfo(BaseModel):
     room_id: int
     select_difficulty: LiveDifficulty = LiveDifficulty.normal
 
+
 class RoomInfo(BaseModel):
-    name: type  # memo
     room_id: int  # 部屋識別子
     live_id: int  # プレイ対象の楽曲識別子
     room_members_count: int  # 部屋に入っている人数
@@ -71,9 +74,7 @@ def create_user(name: str, leader_card_id: int) -> str:
     # NOTE: tokenが衝突したらリトライする必要がある.
     with engine.begin() as conn:
         result = conn.execute(
-            text(
-                "INSERT INTO `user` (name, token, leader_card_id) VALUES (:name, :token, :leader_card_id)"
-            ),
+            text("INSERT INTO `user` (name, token, leader_card_id) VALUES (:name, :token, :leader_card_id)"),
             {"name": name, "token": token, "leader_card_id": leader_card_id},
         )
         # print(result)
@@ -203,3 +204,16 @@ def room_wait(room_id: int, user_id: int) -> tuple[Optional[WaitRoomStatus], Opt
 
     return status, user_list
 
+
+def room_start(room_id: int, user_id: int):
+    with engine.begin() as conn:
+        owner_id = conn.execute(
+            text("SELECT `owner_id` FROM `room` WHERE `room_id`=:room_id"), {"room_id": room_id}
+        ).fetchall()[0][0]
+
+        if user_id == owner_id:
+            conn.execute(
+                text("UPDATE `room` SET status=:status WHERE room_id=:room_id"), {"status": 2, "room_id": room_id}
+            )
+
+    return None
