@@ -36,9 +36,17 @@ class WaitRoomStatus(IntEnum):
     Waiting = 1  # ホストがライブ開始ボタン押すのを待っている
     LiveStart = 2  # ライブ画面遷移OK
     Dissolution = 3  # 解散された
-class JoinInfo(BaseModel):
-    room_id: int
+
+
+# Struct
+
+
+class PlayInfo(BaseModel):
+    live_id: int
     select_difficulty: LiveDifficulty = LiveDifficulty.normal
+
+    class Config:
+        orm_mode = True
 
 
 class RoomInfo(BaseModel):
@@ -160,14 +168,24 @@ def room_join(room_id: int, user_id: int, select_difficulty: LiveDifficulty) -> 
                 {"room_members_count": members + 1, "room_id": room_id},
             )
             # UPDATE room_member table
-            conn.execute(
-                text(
-                    "INSERT `room_member` (room_id, id, diff) \
-                    VALUES (:room_id, :id, :diff) \
-                    ON DUPLICATE KEY UPDATE diff=:diff, exist=1"
-                ),
-                {"room_id": room_id, "id": user_id, "diff": select_difficulty.value},
-            )
+            if len(
+                conn.execute(
+                    text("SELECT `column_id` FROM `room_member` WHERE `room_id`=:room_id AND `id`=:id"),
+                    {"room_id": room_id, "id": user_id},
+                ).fetchall()  # type: ignore
+            ):
+                conn.execute(
+                    text(
+                        "UPDATE `room_member` SET `diff`=:diff, `exist`=:exist \
+                        WHERE `room_id`=:room_id AND `id`=:id"
+                    ),
+                    {"room_id": room_id, "id": user_id, "diff": select_difficulty.value, "exist": 1},
+                )
+            else:
+                conn.execute(
+                    text("INSERT `room_member` (room_id, id, diff, exist) VALUES (:room_id, :id, :diff, :exist)"),
+                    {"room_id": room_id, "id": user_id, "diff": select_difficulty.value, "exist": 1},
+                )
             return JoinRoomResult.Ok
         else:
             pass

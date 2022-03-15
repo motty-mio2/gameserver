@@ -6,8 +6,8 @@ from pydantic import BaseModel
 
 from . import model
 from .model import (
-    JoinInfo,
     JoinRoomResult,
+    LiveDifficulty,
     PlayInfo,
     RoomInfo,
     SafeUser,
