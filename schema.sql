@@ -26,5 +26,7 @@ CREATE TABLE `room_member` (
   `id` bigint DEFAULT NULL,
   `diff` int DEFAULT NULL,
   `exist` int DEFAULT 1,
+  `judge_count_list` varchar(255) DEFAULT NULL,
+  `score` int DEFAULT NULL,
   PRIMARY KEY (`column_id`)
 );

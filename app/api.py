@@ -1,4 +1,4 @@
-from typing import Any
+from typing import Any, Optional
 
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.security.http import HTTPAuthorizationCredentials, HTTPBearer
@@ -8,8 +8,9 @@ from . import model
 from .model import (
     JoinRoomResult,
     LiveDifficulty,
-    PlayInfo,
+    ResultUser,
     RoomInfo,
+    RoomWaitResponse,
     SafeUser,
     get_user_by_token,
 )
@@ -71,7 +72,15 @@ def update(req: UserCreateRequest, token: str = Depends(get_auth_token)):
     """Update user attributes"""
     # print(req)
     model.update_user(token, req.user_name, req.leader_card_id)
-    return None
+    return Empty()
+
+
+class PlayInfo(BaseModel):
+    live_id: int
+    select_difficulty: LiveDifficulty = LiveDifficulty.normal
+
+    class Config:
+        orm_mode = True
 
 
 class RoomCreateResponse(BaseModel):
@@ -84,60 +93,127 @@ def room_create(req: PlayInfo, token: str = Depends(get_auth_token)):
     if user is None:
         return None
     else:
-        room_id: int = model.room_create(user_id=user.id, live_id=req.live_id, select_difficulty=req.select_difficulty)
+        room_id: int = model.room_create(
+            user_id=user.id,
+            live_id=req.live_id,
+            select_difficulty=req.select_difficulty,
+        )
         print(room_id)
     return RoomCreateResponse(room_id=room_id)
 
 
+class RoomListRequest(BaseModel):
+    live_id: int
+
+
 class RoomListResponse(BaseModel):
-    room_ids: list[int]
+    room_info_list: list[RoomInfo]
 
 
 @app.post("/room/list", response_model=RoomListResponse)
-def room_list(live_id: int):
-    room_ids: list[int] = model.room_list(live_id=live_id)
-    return RoomListResponse(room_ids=room_ids)
+def room_list(req: RoomListRequest):
+    room_ids: list[RoomInfo] = model.room_list(live_id=req.live_id)
+    return RoomListResponse(room_info_list=room_ids)
 
 
-class JoinInfo(BaseModel):
+class RoomJoinRequest(BaseModel):
     room_id: int
     select_difficulty: LiveDifficulty = LiveDifficulty.normal
 
 
-@app.post("/room/join", response_model=JoinRoomResult)
-def room_join(join_info: JoinInfo, token: str = Depends(get_auth_token)) -> Any:
+class RoomJoinResponse(BaseModel):
+    join_room_result: JoinRoomResult
+
+
+@app.post("/room/join", response_model=RoomJoinResponse)
+def room_join(req: RoomJoinRequest, token: str = Depends(get_auth_token)) -> Any:
     user = get_user_by_token(token=token)
     if user is None:
         return None
     else:
-        return model.room_join(
-            room_id=join_info.room_id, user_id=user.id, select_difficulty=join_info.select_difficulty
+        return RoomJoinResponse(
+            join_room_result=model.room_join(
+                room_id=req.room_id,
+                user_id=user.id,
+                select_difficulty=req.select_difficulty,
+            )
         )
 
 
-@app.post("/room/wait", response_model=list[RoomInfo])
-def room_wait(room_id: int, token: str = Depends(get_auth_token)):
+class RoomWaitRequest(BaseModel):
+    room_id: int
+
+
+@app.post("/room/wait", response_model=RoomWaitResponse)
+def room_wait(req: RoomWaitRequest, token: str = Depends(get_auth_token)):
     user = get_user_by_token(token=token)
     if user is None:
         return None
     else:
-        return model.room_wait(room_id=room_id, user_id=user.id)
+        return model.room_wait(room_id=req.room_id, user_id=user.id)
+
+
+class RoomStartRequest(BaseModel):
+    room_id: int
 
 
 @app.post("/room/start", response_model=Empty)
-def room_start(room_id: int, token: str = Depends(get_auth_token)):
+def room_start(req: RoomStartRequest, token: str = Depends(get_auth_token)):
     user = get_user_by_token(token=token)
     if user is None:
         return None
     else:
-        return model.room_start(room_id=room_id, user_id=user.id)
+        model.room_start(room_id=req.room_id, user_id=user.id)
+        return Empty()
 
+
+class RoomEndRequest(BaseModel):
+    room_id: int
+    judge_count_list: list[int]
+    score: int
+
+
+@app.post("/room/end", response_model=Empty)
+def room_end(req: RoomEndRequest, token: str = Depends(get_auth_token)) -> Empty:
+    user = get_user_by_token(token=token)
+    if user is None:
+        return Empty()
+    else:
+        model.room_end(
+            room_id=req.room_id,
+            user_id=user.id,
+            judge_count_list=req.judge_count_list,
+            score=req.score,
+        )
+        return Empty()
+
+
+class RoomResultRequest(BaseModel):
+    room_id: int
+
+
+class RoomResultResponse(BaseModel):
+    result_user_list: Optional[list[ResultUser]]
+
+
+@app.post("/room/result", response_model=RoomResultResponse)
+def room_result(req: RoomResultRequest, token: str = Depends(get_auth_token)):
+    user = get_user_by_token(token=token)
+    if user is None:
+        return None
+    else:
+        return RoomResultResponse(result_user_list=model.room_result(room_id=req.room_id))
+
+
+class RoomLeaveRequest(BaseModel):
+    room_id: int
 
 
 @app.post("/room/leave", response_model=Empty)
-def room_leave(room_id: int, token: str = Depends(get_auth_token)):
+def room_leave(req: RoomLeaveRequest, token: str = Depends(get_auth_token)):
     user = get_user_by_token(token=token)
     if user is None:
         return None
     else:
-        return model.room_leave(room_id=room_id, user_id=user.id)
+        model.room_leave(room_id=req.room_id, user_id=user.id)
+        return Empty()

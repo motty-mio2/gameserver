@@ -1,12 +1,9 @@
-import json
 import uuid
 from enum import IntEnum
 from typing import Optional
 
-from fastapi import HTTPException
 from pydantic import BaseModel
 from sqlalchemy import text
-from sqlalchemy.exc import NoResultFound
 
 from .db import engine
 
@@ -38,36 +35,6 @@ class WaitRoomStatus(IntEnum):
     Dissolution = 3  # 解散された
 
 
-# Struct
-
-
-class PlayInfo(BaseModel):
-    live_id: int
-    select_difficulty: LiveDifficulty = LiveDifficulty.normal
-
-    class Config:
-        orm_mode = True
-
-
-class RoomInfo(BaseModel):
-    room_id: int  # 部屋識別子
-    live_id: int  # プレイ対象の楽曲識別子
-    room_members_count: int  # 部屋に入っている人数
-    max_user_count: int  # 部屋の最大人数
-
-
-def _get_room_info(room_id: int) -> RoomInfo:
-    with engine.begin() as conn:
-        result = conn.execute(
-            text("SELECT `live_id`,`room_members_count`,`max_user_count` FROM `room` WHERE `room_id`=:room_id"),
-            {"room_id": room_id},
-        )
-        room_info: list[int] = result.fetchall()[0]
-        return RoomInfo(
-            room_id=room_id, live_id=room_info[0], room_members_count=room_info[1], max_user_count=room_info[2]
-        )
-
-
 class RoomUser(BaseModel):
     user_id: int  # ユーザー識別子
     name: str  # ユーザー名
@@ -77,18 +44,12 @@ class RoomUser(BaseModel):
     is_host: bool  # 部屋を立てた人か
 
 
-class ResultUser(BaseModel):
-    user_id: int  # ユーザー識別子
-    judge_count_list: list[int]  # 各判定数（良い判定から昇順）
-    score: int  # 獲得スコア
-
-
 def create_user(name: str, leader_card_id: int) -> str:
     """Create new user and returns their token"""
     token = str(uuid.uuid4())
     # NOTE: tokenが衝突したらリトライする必要がある.
     with engine.begin() as conn:
-        result = conn.execute(
+        conn.execute(
             text("INSERT INTO `user` (name, token, leader_card_id) VALUES (:name, :token, :leader_card_id)"),
             {"name": name, "token": token, "leader_card_id": leader_card_id},
         )
@@ -136,12 +97,40 @@ def room_create(user_id: int, live_id: int, select_difficulty: LiveDifficulty) -
         return room_id
 
 
-def room_list(live_id: int) -> list[int]:
+class RoomInfo(BaseModel):
+    room_id: int  # 部屋識別子
+    live_id: int  # プレイ対象の楽曲識別子
+    room_members_count: int  # 部屋に入っている人数
+    max_user_count: int  # 部屋の最大人数
+
+
+def _get_room_info(room_id: int) -> RoomInfo:
     with engine.begin() as conn:
         result = conn.execute(
-            text("SELECT `room_id` FROM `room` WHERE `live_id`=:live_id AND `status`=1"), {"live_id": live_id}
+            text("SELECT `live_id`,`room_members_count`,`max_user_count` FROM `room` WHERE `room_id`=:room_id"),
+            {"room_id": room_id},
         )
-        room_ids = [room[0] for room in result.fetchall()]
+        room_info: list[int] = result.fetchall()[0]
+        return RoomInfo(
+            room_id=room_id,
+            live_id=room_info[0],
+            room_members_count=room_info[1],
+            max_user_count=room_info[2],
+        )
+
+
+def room_list(live_id: int) -> list[RoomInfo]:
+    with engine.begin() as conn:
+        result = conn.execute(
+            text(
+                "SELECT `room_id`, `room_members_count`,`max_user_count` FROM `room` WHERE `live_id`=:live_id AND `status`=1"
+            ),
+            {"live_id": live_id},
+        ).fetchall()
+        room_ids = [
+            RoomInfo(room_id=room[0], live_id=live_id, room_members_count=room[1], max_user_count=room[2])
+            for room in result
+        ]
     return room_ids
 
 
@@ -155,7 +144,8 @@ class JoinRoomResult(IntEnum):
 def room_join(room_id: int, user_id: int, select_difficulty: LiveDifficulty) -> JoinRoomResult:
     with engine.begin() as conn:
         members, status = conn.execute(
-            text("SELECT `room_members_count`, `status` FROM `room` WHERE `room_id`=:room_id"), {"room_id": room_id}
+            text("SELECT `room_members_count`, `status` FROM `room` WHERE `room_id`=:room_id"),
+            {"room_id": room_id},
         ).fetchall()[0]
         if status != 1 or members < 1:
             return JoinRoomResult.Disbanded
@@ -179,12 +169,22 @@ def room_join(room_id: int, user_id: int, select_difficulty: LiveDifficulty) -> 
                         "UPDATE `room_member` SET `diff`=:diff, `exist`=:exist \
                         WHERE `room_id`=:room_id AND `id`=:id"
                     ),
-                    {"room_id": room_id, "id": user_id, "diff": select_difficulty.value, "exist": 1},
+                    {
+                        "room_id": room_id,
+                        "id": user_id,
+                        "diff": select_difficulty.value,
+                        "exist": 1,
+                    },
                 )
             else:
                 conn.execute(
                     text("INSERT `room_member` (room_id, id, diff, exist) VALUES (:room_id, :id, :diff, :exist)"),
-                    {"room_id": room_id, "id": user_id, "diff": select_difficulty.value, "exist": 1},
+                    {
+                        "room_id": room_id,
+                        "id": user_id,
+                        "diff": select_difficulty.value,
+                        "exist": 1,
+                    },
                 )
             return JoinRoomResult.Ok
         else:
@@ -192,22 +192,30 @@ def room_join(room_id: int, user_id: int, select_difficulty: LiveDifficulty) -> 
     return JoinRoomResult.OtherError
 
 
-def room_wait(room_id: int, user_id: int) -> tuple[Optional[WaitRoomStatus], Optional[list[RoomUser]]]:
+class RoomWaitResponse(BaseModel):
+    status: WaitRoomStatus
+    room_user_list: list[RoomUser]
+
+
+def room_wait(room_id: int, user_id: int) -> RoomWaitResponse:
     with engine.begin() as conn:
         status, owner_id = conn.execute(
-            text("SELECT `status`,`owner_id` FROM `room` WHERE `room_id`=:room_id"), {"room_id": room_id}
+            text("SELECT `status`,`owner_id` FROM `room` WHERE `room_id`=:room_id"),
+            {"room_id": room_id},
         ).fetchall()[0]
 
         status: WaitRoomStatus = WaitRoomStatus(status)
 
         result_member: list[tuple[int, ...]] = conn.execute(  # type: ignore
-            text("SELECT `id`, `diff` FROM `room_member` WHERE `room_id`=:room_id AND exist=1"), {"room_id": room_id}
+            text("SELECT `id`, `diff` FROM `room_member` WHERE `room_id`=:room_id AND exist=1"),
+            {"room_id": room_id},
         ).fetchall()  # type: ignore
 
         user_list: list[RoomUser] = []
         for id, diff in result_member:  # type: ignore
             name, lci = conn.execute(  # type: ignore
-                text("SELECT `name`, `leader_card_id` FROM `user` WHERE `id`=:user_id"), {"user_id": id}
+                text("SELECT `name`, `leader_card_id` FROM `user` WHERE `id`=:user_id"),
+                {"user_id": id},
             ).fetchall()[0]
             user_list.append(
                 RoomUser(
@@ -220,27 +228,73 @@ def room_wait(room_id: int, user_id: int) -> tuple[Optional[WaitRoomStatus], Opt
                 )
             )
 
-    return status, user_list
+    return RoomWaitResponse(status=status, room_user_list=user_list)
 
 
 def room_start(room_id: int, user_id: int):
     with engine.begin() as conn:
         owner_id = conn.execute(
-            text("SELECT `owner_id` FROM `room` WHERE `room_id`=:room_id"), {"room_id": room_id}
+            text("SELECT `owner_id` FROM `room` WHERE `room_id`=:room_id"),
+            {"room_id": room_id},
         ).fetchall()[0][0]
 
         if user_id == owner_id:
             conn.execute(
-                text("UPDATE `room` SET status=:status WHERE room_id=:room_id"), {"status": 2, "room_id": room_id}
+                text("UPDATE `room` SET status=:status WHERE room_id=:room_id"),
+                {"status": 2, "room_id": room_id},
             )
 
     return None
 
 
+def room_end(room_id: int, user_id: int, judge_count_list: list[int], score: int) -> None:
+    with engine.begin() as conn:
+        jcl = ",".join(map(str, judge_count_list))
+        conn.execute(
+            text(
+                "UPDATE `room_member` SET judge_count_list=:jcl, `score`=:score \
+                WHERE `room_id`=:room_id AND `id`=:user_id"
+            ),
+            {"jcl": jcl, "score": score, "room_id": room_id, "user_id": user_id},
+        )
+
+        return None
+
+
+class ResultUser(BaseModel):
+    user_id: int  # ユーザー識別子
+    judge_count_list: list[int]  # 各判定数（良い判定から昇順）
+    score: int  # 獲得スコア
+
+
+def room_result(room_id: int) -> Optional[list[ResultUser]]:
+    with engine.begin() as conn:
+        members = conn.execute(
+            text("SELECT `room_members_count` FROM `room` WHERE `room_id`=:room_id"), {"room_id": room_id}
+        ).fetchall()[0][0]
+        result = conn.execute(
+            text(
+                "SELECT `id`, `judge_count_list`, `score` FROM `room_member` \
+                WHERE `room_id`=:room_id AND `score` IS NOT NULL "
+            ),
+            {"room_id": room_id},
+        ).fetchall()  # type: ignore
+
+    if len(result) == members:
+        result_user_list: list[ResultUser] = []
+        for uid, jcl, sc in result:
+            result_user_list.append(ResultUser(user_id=uid, judge_count_list=list(map(int, jcl.split(","))), score=sc))  # type: ignore)
+
+        return result_user_list
+    else:
+        return None
+
+
 def room_leave(room_id: int, user_id: int):
     with engine.begin() as conn:
         owner_id = conn.execute(
-            text("SELECT `owner_id` FROM `room` WHERE `room_id`=:room_id"), {"room_id": room_id}
+            text("SELECT `owner_id` FROM `room` WHERE `room_id`=:room_id"),
+            {"room_id": room_id},
         ).fetchall()[0]
 
         if owner_id == user_id:
@@ -251,7 +305,8 @@ def room_leave(room_id: int, user_id: int):
             )
         else:
             members: int = conn.execute(
-                text("SELECT `room_members_count` FROM `room` WHERE `room_id`=:room_id"), {"room_id": room_id}
+                text("SELECT `room_members_count` FROM `room` WHERE `room_id`=:room_id"),
+                {"room_id": room_id},
             ).fetchall()[0][0]
 
             conn.execute(
